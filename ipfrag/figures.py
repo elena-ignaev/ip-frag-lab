@@ -11,7 +11,14 @@ DARK = dict(
     paper_bgcolor="#020617",
     plot_bgcolor="#020617",
     font=dict(color="#e2e8f0", size=12),
-    hoverlabel=dict(bgcolor="#0f172a", font_size=13, font_family="Inter, sans-serif", align="left"),
+    hoverlabel=dict(
+        bgcolor="rgba(15,23,42,0.94)",
+        bordercolor="#334155",
+        font_size=11,
+        font_family="Inter, sans-serif",
+        align="left",
+        namelength=-1,
+    ),
 )
 
 
@@ -58,18 +65,17 @@ def journey_figure(result: FragmentationResult, highlight: int = 0) -> go.Figure
 
     def original_trace(x: float, stuck: bool) -> go.Scatter:
         why = (
-            f"Original datagram {result.packet_size} B at the sender.<br>"
-            f"Payload {result.payload_size} B + header {result.header_size} B."
+            f"<b>Original datagram</b> · {result.packet_size} B<br>"
+            f"{result.header_size} B header + {result.payload_size} B payload"
         )
         if stuck:
             why = (
-                f"<b>Too wide for this link</b><br>"
-                f"Datagram {result.packet_size} B &gt; MTU {result.mtu} B.<br>"
-                f"The router must fragment the payload; it cannot squeeze the whole packet through."
+                f"<b>{result.packet_size} B &gt; MTU {result.mtu} B</b><br>"
+                "Too wide for this link — must be fragmented."
                 if result.fragmented
                 else (
-                    f"Datagram {result.packet_size} B ≤ MTU {result.mtu} B.<br>"
-                    f"No split needed — send as one packet (MF=0)."
+                    f"<b>{result.packet_size} B ≤ MTU {result.mtu} B</b><br>"
+                    "Fits — sent as one packet (MF=0)."
                 )
             )
         return go.Scatter(
@@ -316,9 +322,9 @@ def on_wire_figure(result: FragmentationResult, highlight: int = 0) -> go.Figure
                 [f.index, f.header_size, f.payload_size, f.offset_units, f.mf] for f in result.fragments
             ],
             hovertemplate=(
-                "Fragment %{x}<br>On-wire %{y} B = %{customdata[1]} B header + %{customdata[2]} B payload<br>"
-                "Offset=%{customdata[3]}  MF=%{customdata[4]}<br>"
-                "Must be ≤ MTU so this packet can leave the router.<extra></extra>"
+                "<b>%{x}</b> · %{y} B on wire<br>"
+                "%{customdata[1]} B header + %{customdata[2]} B payload<br>"
+                "Offset %{customdata[3]} · MF=%{customdata[4]}<extra></extra>"
             ),
             showlegend=False,
         )
@@ -338,49 +344,127 @@ def on_wire_figure(result: FragmentationResult, highlight: int = 0) -> go.Figure
         title="On-wire size vs MTU",
         yaxis=dict(title="Bytes", gridcolor="#1e293b", rangemode="tozero"),
         xaxis=dict(title="Fragment"),
-        hovermode="x unified",
+        hovermode="closest",
     )
     return fig
 
 
+#: Fields that fragmentation actually uses; drawn with an accent border.
+_FRAG_FIELDS = {"Identification", "Flags", "Fragment Offset", "Total Length"}
+
+WORD_TOP = "Bytes 0–3"
+WORD_BOTTOM = "Bytes 4–7"
+
+
 def header_inspector_figure(frag: Fragment) -> go.Figure:
-    """IPv4 header fields for one fragment; hover each box for the teaching note."""
+    """The two IPv4 header words that matter for fragmentation, laid out to
+    scale in bits so no cell overlaps another."""
+    ihl = frag.header_size // 4
+    #: (row, first bit, width in bits, label, value, hover note)
     cells = [
-        (0, 3, "Identification", str(frag.identification), "Same ID on every fragment so Host B can group this datagram."),
-        (3.1, 1.2, "Flags", frag.flags_bits, f"Reserved=0, DF={frag.df} (may fragment), MF={frag.mf}."),
-        (4.4, 3.6, "Fragment Offset", str(frag.offset_units), f"Payload starts at byte {frag.offset_bytes} (= {frag.offset_units} × 8)."),
-        (0, 2.0, "IHL / HLen", str(frag.header_size), "Copied onto this fragment; not shared with siblings."),
-        (2.1, 2.9, "Total Length", str(frag.total_size), "Length of THIS packet only (header + this slice), not the original datagram."),
-        (5.1, 2.9, "MF meaning", "more" if frag.mf else "last", "MF=1 → more fragments follow. MF=0 → this is the last piece."),
+        (WORD_TOP, 0, 4, "Ver", "4", "IP version 4."),
+        (WORD_TOP, 4, 4, "IHL", str(ihl), f"Header length in 4-byte words: {ihl} × 4 = {frag.header_size} B."),
+        (WORD_TOP, 8, 8, "DSCP/ECN", "0", "Traffic class. Not involved in fragmentation."),
+        (
+            WORD_TOP,
+            16,
+            16,
+            "Total Length",
+            str(frag.total_size),
+            f"Length of THIS fragment: {frag.header_size} B header + {frag.payload_size} B slice. "
+            "Not the original datagram length.",
+        ),
+        (
+            WORD_BOTTOM,
+            0,
+            16,
+            "Identification",
+            str(frag.identification),
+            "Identical on every fragment of the datagram, so the receiver knows which pieces belong together.",
+        ),
+        (
+            WORD_BOTTOM,
+            16,
+            3,
+            "Flags",
+            frag.flags_bits,
+            f"reserved=0, DF={frag.df} (fragmenting allowed), MF={frag.mf} "
+            + ("— more fragments follow." if frag.mf else "— this is the last fragment."),
+        ),
+        (
+            WORD_BOTTOM,
+            19,
+            13,
+            "Fragment Offset",
+            str(frag.offset_units),
+            f"Payload starts at byte {frag.offset_bytes} of the original payload, "
+            f"stored ÷ 8 as {frag.offset_units}.",
+        ),
     ]
+
     fig = go.Figure()
-    for x0, w, title, value, tip in cells:
+    for row, bit, width, label, value, tip in cells:
+        accent = label in _FRAG_FIELDS
         fig.add_trace(
             go.Bar(
-                x=[w],
-                y=["IPv4 header (this fragment)"],
-                base=x0,
+                x=[width],
+                y=[row],
+                base=bit,
                 orientation="h",
-                marker=dict(color="#1e3a5f", line=dict(color="#38bdf8", width=1)),
-                hovertemplate=f"<b>{title} = {value}</b><br>{tip}<extra></extra>",
+                width=0.74,
+                marker=dict(
+                    color="#1e3a5f" if accent else "#111c2f",
+                    line=dict(color="#38bdf8" if accent else "#334155", width=2 if accent else 1),
+                ),
+                hovertemplate=f"<b>{label} = {value}</b><br>{tip}<extra></extra>",
                 showlegend=False,
             )
         )
+        # Narrow cells cannot hold two lines of text; drop the value there and
+        # let the tooltip carry it.
+        if width >= 8:
+            text, size = f"{label}<br><b>{value}</b>", 11
+        elif width >= 4:
+            text, size = f"{label}<br><b>{value}</b>", 9
+        else:
+            text, size = f"<b>{value}</b>", 9
         fig.add_annotation(
-            x=x0 + w / 2,
-            y=0,
-            text=f"{title}<br><b>{value}</b>",
+            x=bit + width / 2,
+            y=row,
+            text=text,
             showarrow=False,
-            font=dict(size=11, color="#e2e8f0"),
+            align="center",
+            font=dict(size=size, color="#e2e8f0" if accent else "#94a3b8"),
         )
+
+    fig.add_annotation(
+        x=17.5,
+        y=WORD_BOTTOM,
+        yshift=-36,
+        text="↑ Flags",
+        showarrow=False,
+        font=dict(size=9, color="#64748b"),
+    )
     fig.update_layout(
         **DARK,
         barmode="overlay",
-        height=200,
-        margin=dict(l=24, r=24, t=36, b=24),
-        title=f"Fragment {frag.index} — hover a header field",
-        xaxis=dict(range=[-0.1, 8.2], visible=False),
-        yaxis=dict(visible=False),
+        bargap=0.35,
+        height=290,
+        margin=dict(l=86, r=28, t=54, b=56),
+        title=f"Fragment {frag.index} — IPv4 header (hover a field)",
+        xaxis=dict(
+            range=[0, 32],
+            tickvals=[0, 8, 16, 24, 32],
+            title=dict(text="bit position in the 32-bit word", font=dict(size=11, color="#64748b")),
+            gridcolor="#1e293b",
+            zeroline=False,
+        ),
+        yaxis=dict(
+            categoryorder="array",
+            categoryarray=[WORD_BOTTOM, WORD_TOP],
+            showgrid=False,
+            tickfont=dict(size=11, color="#94a3b8"),
+        ),
         hovermode="closest",
     )
     return fig

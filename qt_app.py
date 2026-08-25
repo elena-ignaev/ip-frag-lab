@@ -9,6 +9,7 @@ from PyQt6.QtCore import QRectF, Qt, QTimer
 from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -29,6 +30,7 @@ from PyQt6.QtWidgets import (
 
 from ipfrag.diagram import color_for, explain_steps, hover_story_plain
 from ipfrag.engine import FragmentationError, FragmentationResult, fragment_ipv4
+from ipfrag.presets import DEFAULT_SCENARIO, SCENARIOS
 
 
 class PacketCanvas(QWidget):
@@ -217,20 +219,37 @@ class MainWindow(QMainWindow):
         blurb.setWordWrap(True)
         form_wrap.addWidget(blurb)
 
+        suggested = QLabel("Suggested settings")
+        suggested.setStyleSheet("font-weight: 600; margin-top: 6px;")
+        form_wrap.addWidget(suggested)
+        self.scenario = QComboBox()
+        for scenario in SCENARIOS:
+            self.scenario.addItem(scenario.name, scenario)
+        self.scenario.currentIndexChanged.connect(self.apply_scenario)
+        form_wrap.addWidget(self.scenario)
+        self.scenario_why = QLabel()
+        self.scenario_why.setWordWrap(True)
+        self.scenario_why.setStyleSheet("color:#94a3b8; font-size: 12px;")
+        form_wrap.addWidget(self.scenario_why)
+
         form = QFormLayout()
         self.packet = QSpinBox()
         self.packet.setRange(20, 65535)
-        self.packet.setValue(4000)
+        self.packet.setValue(DEFAULT_SCENARIO.packet_size)
         self.mtu = QSpinBox()
         self.mtu.setRange(28, 65535)
-        self.mtu.setValue(1500)
+        self.mtu.setValue(DEFAULT_SCENARIO.mtu)
         self.header = QSpinBox()
         self.header.setRange(20, 60)
         self.header.setSingleStep(4)
-        self.header.setValue(20)
+        self.header.setValue(DEFAULT_SCENARIO.header_size)
         self.ident = QSpinBox()
         self.ident.setRange(0, 65535)
-        self.ident.setValue(777)
+        self.ident.setValue(DEFAULT_SCENARIO.identification)
+        self.packet.setToolTip("Total length of the original datagram, including its IP header.")
+        self.mtu.setToolTip("Largest packet the next link accepts. Ethernet is 1500; IPv4 hosts must accept at least 576.")
+        self.header.setToolTip("20 B with no options; up to 60 B in 4-byte steps.")
+        self.ident.setToolTip("Every fragment of this datagram carries the same value.")
         form.addRow("Packet size (B)", self.packet)
         form.addRow("MTU (B)", self.mtu)
         form.addRow("Header size (B)", self.header)
@@ -242,12 +261,9 @@ class MainWindow(QMainWindow):
         self.go.clicked.connect(self.run_now)
         self.play = QPushButton("Animate send")
         self.play.clicked.connect(self.run_animated)
-        self.preset = QPushButton("Load 4000 / 1500 / 20")
-        self.preset.clicked.connect(self.load_preset)
         row.addWidget(self.go)
         row.addWidget(self.play)
         form_wrap.addLayout(row)
-        form_wrap.addWidget(self.preset)
 
         self.notes = QTextEdit()
         self.notes.setReadOnly(True)
@@ -280,16 +296,26 @@ class MainWindow(QMainWindow):
             QSpinBox, QTextEdit, QTableWidget { background: #020617; color: #e2e8f0;
                           border: 1px solid #1e293b; border-radius: 6px; }
             QHeaderView::section { background: #1e293b; color: #e2e8f0; padding: 4px; }
+            QComboBox { background: #020617; color: #e2e8f0; border: 1px solid #1e293b;
+                        border-radius: 6px; padding: 6px; }
+            QComboBox QAbstractItemView { background: #0f172a; color: #e2e8f0;
+                        selection-background-color: #2563eb; }
             QToolTip { background: #0f172a; color: #e2e8f0; border: 1px solid #38bdf8;
                        padding: 8px; }
             """
         )
+        self.scenario_why.setText(DEFAULT_SCENARIO.why)
 
-    def load_preset(self) -> None:
-        self.packet.setValue(4000)
-        self.mtu.setValue(1500)
-        self.header.setValue(20)
-        self.ident.setValue(777)
+    def apply_scenario(self) -> None:
+        scenario = self.scenario.currentData()
+        if scenario is None:
+            return
+        self.scenario_why.setText(scenario.why)
+        self.packet.setValue(scenario.packet_size)
+        self.mtu.setValue(scenario.mtu)
+        self.header.setValue(scenario.header_size)
+        self.ident.setValue(scenario.identification)
+        self.run_now()
 
     def _compute(self) -> FragmentationResult | None:
         try:
