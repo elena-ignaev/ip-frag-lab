@@ -9,6 +9,7 @@ from pandas import DataFrame
 
 from ipfrag.diagram import explain_steps
 from ipfrag.engine import FragmentationError, fragment_ipv4
+from ipfrag.presets import CUSTOM, DEFAULT_SCENARIO, SCENARIOS, SCENARIOS_BY_NAME
 from ipfrag.figures import (
     fragment_cards_html,
     header_inspector_figure,
@@ -55,29 +56,87 @@ st.caption(
     "Hover packets, payload slices, and header fields for the offset and flag story."
 )
 
-with st.sidebar:
-    st.header("Datagram inputs")
-    packet_size = st.number_input("Packet size (bytes)", min_value=20, max_value=65535, value=4000, step=1)
-    mtu = st.number_input("MTU (bytes)", min_value=28, max_value=65535, value=1500, step=1)
-    header_size = st.select_slider("Header size (bytes)", options=list(range(20, 61, 4)), value=20)
-    identification = st.number_input("Identification (16-bit)", min_value=0, max_value=65535, value=777)
-    st.divider()
-    presets = st.selectbox(
-        "Presets",
-        (
-            "Custom",
-            "Ethernet example (4000 / 1500 / 20)",
-            "Low MTU path (4000 / 576 / 20)",
-            "Already fits (500 / 1500 / 20)",
-        ),
-    )
-    if presets.startswith("Ethernet"):
-        packet_size, mtu, header_size = 4000, 1500, 20
-    elif presets.startswith("Low"):
-        packet_size, mtu, header_size = 4000, 576, 20
-    elif presets.startswith("Already"):
-        packet_size, mtu, header_size = 500, 1500, 20
+if "packet_size" not in st.session_state:
+    st.session_state.packet_size = DEFAULT_SCENARIO.packet_size
+    st.session_state.mtu = DEFAULT_SCENARIO.mtu
+    st.session_state.header_size = DEFAULT_SCENARIO.header_size
+    st.session_state.identification = DEFAULT_SCENARIO.identification
+    st.session_state.scenario = DEFAULT_SCENARIO.name
 
+
+def apply_scenario() -> None:
+    """Copy a suggested scenario into the input widgets."""
+    scenario = SCENARIOS_BY_NAME.get(st.session_state.scenario)
+    if scenario is None:
+        return
+    st.session_state.packet_size = scenario.packet_size
+    st.session_state.mtu = scenario.mtu
+    st.session_state.header_size = scenario.header_size
+    st.session_state.identification = scenario.identification
+    st.session_state.step = 0
+    st.session_state.inspect = 1
+
+
+def mark_custom() -> None:
+    """Hand-edited inputs no longer match the named scenario."""
+    st.session_state.scenario = CUSTOM
+
+
+with st.sidebar:
+    st.header("Suggested settings")
+    st.caption("Not sure what to enter? Pick a scenario and the inputs below fill in.")
+    st.selectbox(
+        "Scenario",
+        [s.name for s in SCENARIOS] + [CUSTOM],
+        key="scenario",
+        on_change=apply_scenario,
+    )
+    chosen = SCENARIOS_BY_NAME.get(st.session_state.scenario)
+    if chosen is not None:
+        st.info(
+            f"**{chosen.packet_size} B datagram · MTU {chosen.mtu} · header "
+            f"{chosen.header_size} B**\n\n{chosen.why}"
+        )
+    else:
+        st.caption("Adjust the four inputs below however you like.")
+
+    st.divider()
+    st.subheader("Datagram inputs")
+    packet_size = st.number_input(
+        "Packet size (bytes)",
+        min_value=20,
+        max_value=65535,
+        step=1,
+        key="packet_size",
+        on_change=mark_custom,
+        help="Total length of the original datagram, including its IP header.",
+    )
+    mtu = st.number_input(
+        "MTU (bytes)",
+        min_value=28,
+        max_value=65535,
+        step=1,
+        key="mtu",
+        on_change=mark_custom,
+        help="Largest packet the next link accepts. Ethernet is 1500; IPv4 hosts must accept at least 576.",
+    )
+    header_size = st.select_slider(
+        "Header size (bytes)",
+        options=list(range(20, 61, 4)),
+        key="header_size",
+        on_change=mark_custom,
+        help="20 B with no options. Options push it up to 60 B, in 4-byte steps.",
+    )
+    identification = st.number_input(
+        "Identification (16-bit)",
+        min_value=0,
+        max_value=65535,
+        key="identification",
+        on_change=mark_custom,
+        help="Any value 0–65535. Every fragment of this datagram carries the same one.",
+    )
+
+    st.divider()
     play = st.button("Play narration", type="primary", width="stretch")
     reset = st.button("Reset highlight", width="stretch")
     st.caption("Use ▶ Send packets on the diagram to animate the forwarding path.")

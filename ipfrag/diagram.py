@@ -21,23 +21,13 @@ def color_for(index: int) -> str:
 
 
 def hover_story(frag, result: FragmentationResult) -> str:
-    """Plain-language tooltip for one fragment (Plotly / Qt)."""
-    last = "last piece — MF=0 so the receiver knows the datagram is complete"
-    more = "MF=1 — the receiver must wait for later pieces before reassembling"
-    mf_why = last if frag.mf == 0 else more
+    """Compact tooltip for one fragment. Kept to four short lines so the label
+    does not cover neighbouring click targets."""
     return (
-        f"<b>Fragment {frag.index} of {result.fragment_count}</b><br>"
-        f"On the wire: <b>{frag.total_size} B</b> "
-        f"(header {frag.header_size} + payload {frag.payload_size})<br>"
-        f"Fits MTU {result.mtu} B? "
-        f"{'yes' if frag.total_size <= result.mtu else 'no'}<br><br>"
-        f"This piece carries original payload bytes "
-        f"<b>{frag.offset_bytes}–{frag.payload_end - 1}</b><br>"
-        f"Fragment Offset field = {frag.offset_bytes} ÷ 8 = <b>{frag.offset_units}</b><br>"
-        f"Identification = <b>{frag.identification}</b> "
-        f"(copied onto every fragment of this datagram)<br>"
-        f"Flags {frag.flags_bits} → {frag.flags_label}<br>"
-        f"{mf_why}"
+        f"<b>Fragment {frag.index}/{result.fragment_count}</b> · {frag.total_size} B on wire<br>"
+        f"{frag.header_size} B header + {frag.payload_size} B payload<br>"
+        f"Payload bytes {frag.offset_bytes}–{frag.payload_end - 1}<br>"
+        f"Offset {frag.offset_bytes}÷8 = <b>{frag.offset_units}</b> · MF={frag.mf}"
     )
 
 
@@ -55,13 +45,9 @@ def hover_story_plain(frag, result: FragmentationResult) -> str:
 
 def hover_payload_map(frag, result: FragmentationResult) -> str:
     return (
-        f"<b>Original payload slice → Fragment {frag.index}</b><br>"
-        f"Bytes {frag.offset_bytes}–{frag.payload_end - 1} of the "
-        f"{result.payload_size} B payload<br>"
-        f"The router copies a fresh {frag.header_size} B IP header, "
-        f"then sends this slice as a {frag.total_size} B packet.<br>"
-        f"Offset={frag.offset_units}  {frag.flags_label}<br>"
-        f"<i>Click to pin this fragment in the header inspector.</i>"
+        f"<b>F{frag.index}</b> · bytes {frag.offset_bytes}–{frag.payload_end - 1}"
+        f" of {result.payload_size}<br>"
+        f"Offset {frag.offset_units} · MF={frag.mf} · click to inspect"
     )
 
 
