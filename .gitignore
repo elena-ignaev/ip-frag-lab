@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+dist/
+build/
+.DS_Store
+.streamlit/secrets.toml
+*.app/
+IPFragLab/
