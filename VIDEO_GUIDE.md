@@ -33,17 +33,21 @@ Suggested layout: IDE or Finder with `ipfrag/engine.py` visible for 20 seconds, 
 
 ---
 
-## Shot 3 — Streamlit: textbook example (90 s)
+## Shot 3 — Streamlit: send the packets (2 min)
 
 **Do:**
 
 1. Run `streamlit run streamlit_app.py` and wait for the browser.
 2. Sidebar: Packet size **4000**, MTU **1500**, Header **20**, Identification **777** (or pick the Ethernet preset).
-3. Click **Play animation**. Let it run.
-4. Pause on the table. Point at Offset ×8 = 0, 185, 370 and MF = 1, 1, 0.
+3. Click **▶ Send packets** on the diagram. Let the datagram reach the dashed MTU gate and the three fragments cross to Host B.
+4. **Hover fragment 2** — hold still so the tooltip is readable on camera.
+5. Hover each **fragment card** so it expands.
+6. **Hover, then click, the middle slice** of “Which original bytes go in which fragment?” and show the header inspector updating.
+7. Hover **Fragment Offset** and **Flags** in the header inspector.
+8. Click **Play narration** and let one or two steps advance.
 
 **Say:**  
-“Payload is 3980 bytes. Each non-final fragment can carry 1480 bytes because (1500 − 20) is already a multiple of 8. Offset 185 means the second fragment starts 1480 bytes into the original payload. The last fragment has MF = 0.”
+“Payload is 3980 bytes. Each non-final fragment can carry 1480 bytes because (1500 − 20) is already a multiple of 8. The tooltip shows fragment 2 carrying original bytes 1480 to 2959, so the Offset field is 1480 divided by 8 — that is 185. MF stays 1 until the last fragment, which tells Host B when it can reassemble.”
 
 ---
 
@@ -64,11 +68,12 @@ Suggested layout: IDE or Finder with `ipfrag/engine.py` visible for 20 seconds, 
 **Do:**
 
 1. Run `python qt_app.py` **or** launch `IPFragLab` from `dist/`.
-2. Click **Load 4000 / 1500 / 20**, then **Animate**.
-3. Scroll the notes panel and the table.
+2. Click **Load 4000 / 1500 / 20**, then **Animate send**.
+3. Hover a coloured fragment square — show the tooltip and the byte-range line under the diagram.
+4. Hover a row in the fragment table and point out the matching packet lighting up.
 
 **Say:**  
-“The desktop app is the packaged executable. Animate draws each fragment in order so you can see the header copied every time.”
+“The desktop app is the packaged executable. The same story plays here: the datagram stops at the MTU gate, then each fragment travels with its own copied header. Hovering any fragment explains its offset and flags.”
 
 ---
 
@@ -84,5 +89,8 @@ Suggested layout: IDE or Finder with `ipfrag/engine.py` visible for 20 seconds, 
 - [ ] 4000 / 1500 / 20 → 3 fragments  
 - [ ] Offsets 0, 185, 370  
 - [ ] MF 1, 1, 0  
+- [ ] Animation: datagram → MTU gate → fragments in flight  
+- [ ] Hover a fragment (tooltip with byte range)  
+- [ ] Click a payload slice → header inspector  
 - [ ] Fit case: no fragmentation  
 - [ ] Show executable or `python qt_app.py`

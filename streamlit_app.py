@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import time
 
-import plotly.graph_objects as go
 import streamlit as st
 from pandas import DataFrame
 
-from ipfrag.diagram import color_for, explain_steps
+from ipfrag.diagram import explain_steps
 from ipfrag.engine import FragmentationError, fragment_ipv4
+from ipfrag.figures import (
+    fragment_cards_html,
+    header_inspector_figure,
+    journey_figure,
+    on_wire_figure,
+    payload_map_figure,
+)
 
 st.set_page_config(
     page_title="IP Fragmentation Lab",
@@ -23,107 +29,30 @@ st.markdown(
     .block-container {padding-top: 1.4rem;}
     div[data-testid="stMetric"] {background: #0f172a; border: 1px solid #1e293b;
       border-radius: 12px; padding: 8px 12px;}
+    .frag-row {display:flex; gap:12px; flex-wrap:wrap; margin: 4px 0 18px 0; align-items:flex-start;}
+    .frag-card {flex:1 1 180px; min-width:180px; background:#0f172a;
+      border:2px solid #38bdf8; border-radius:12px; padding:12px;
+      transition: transform .16s ease, box-shadow .16s ease, background .16s ease;}
+    .frag-card:hover {transform: translateY(-4px); background:#132038;
+      box-shadow: 0 12px 30px rgba(56,189,248,.28);}
+    .frag-kicker {font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:#94a3b8;}
+    .frag-id {font-size:19px; font-weight:700; margin:2px 0 0 0;}
+    .wire-bar {height:8px; border-radius:99px; margin:9px 0;}
+    .frag-meta {font-size:12px; color:#cbd5e1;}
+    .frag-tip {max-height:0; opacity:0; overflow:hidden; font-size:12px; line-height:1.5;
+      color:#e2e8f0; transition: max-height .22s ease, opacity .22s ease, margin .22s ease;}
+    .frag-card:hover .frag-tip {max-height:220px; opacity:1; margin-top:10px;
+      border-top:1px solid #334155; padding-top:8px;}
+    .frag-hint {font-size:12px; color:#94a3b8; margin-bottom:2px;}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-
-def packet_figure(result, highlight: int) -> go.Figure:
-    fig = go.Figure()
-    y_orig = 2.2
-    header = result.header_size
-    payload = result.payload_size
-    total = max(result.packet_size, 1)
-
-    fig.add_trace(
-        go.Bar(
-            x=[header],
-            y=[y_orig],
-            base=0,
-            orientation="h",
-            marker=dict(color="#1e3a5f"),
-            name="Header",
-            hovertemplate="Original header: %{x} B<extra></extra>",
-            showlegend=True,
-        )
-    )
-    fig.add_trace(
-        go.Bar(
-            x=[payload],
-            y=[y_orig],
-            base=header,
-            orientation="h",
-            marker=dict(color="#64748b"),
-            name="Original payload",
-            hovertemplate="Original payload: %{x} B<extra></extra>",
-        )
-    )
-
-    for frag in result.fragments:
-        y = 1.2 - (frag.index - 1) * 0.55
-        line = dict(width=4, color="#facc15") if frag.index == highlight else dict(width=0)
-        fig.add_trace(
-            go.Bar(
-                x=[frag.header_size],
-                y=[y],
-                base=0,
-                orientation="h",
-                marker=dict(color="#1e3a5f", line=line),
-                name=f"F{frag.index} header",
-                hovertemplate=f"F{frag.index} header: {frag.header_size} B<extra></extra>",
-                showlegend=False,
-            )
-        )
-        fig.add_trace(
-            go.Bar(
-                x=[frag.payload_size],
-                y=[y],
-                base=frag.header_size,
-                orientation="h",
-                marker=dict(color=color_for(frag.index), line=line),
-                name=f"Fragment {frag.index}",
-                hovertemplate=(
-                    f"F{frag.index}: payload {frag.payload_size} B<br>"
-                    f"offset {frag.offset_units} ({frag.offset_bytes} B)<br>"
-                    f"{frag.flags_label}<extra></extra>"
-                ),
-            )
-        )
-        fig.add_annotation(
-            x=frag.header_size + frag.payload_size + total * 0.02,
-            y=y,
-            text=f"F{frag.index}  off={frag.offset_units}  MF={frag.mf}",
-            showarrow=False,
-            xanchor="left",
-            font=dict(color="#e2e8f0", size=12),
-        )
-
-    height = 220 + 70 * result.fragment_count
-    fig.update_layout(
-        barmode="stack",
-        height=height,
-        paper_bgcolor="#020617",
-        plot_bgcolor="#020617",
-        font=dict(color="#e2e8f0"),
-        legend=dict(orientation="h", y=1.12),
-        margin=dict(l=40, r=160, t=40, b=40),
-        xaxis=dict(title="Bytes", range=[0, total * 1.35], gridcolor="#1e293b"),
-        yaxis=dict(
-            tickmode="array",
-            tickvals=[2.2] + [1.2 - (i) * 0.55 for i in range(result.fragment_count)],
-            ticktext=["Original"] + [f"F{i+1}" for i in range(result.fragment_count)],
-            showgrid=False,
-        ),
-        title="Datagram → fragments (header copied onto each piece)",
-    )
-    return fig
-
-
 st.title("IPv4 Fragmentation Lab")
 st.caption(
-    "Network-layer teaching tool: enter packet size, MTU, and header size. "
-    "The lab computes fragment offsets and flags, then animates the split."
+    "Watch a datagram hit the MTU gate, split into fragments, and travel to the receiver. "
+    "Hover packets, payload slices, and header fields for the offset and flag story."
 )
 
 with st.sidebar:
@@ -149,8 +78,9 @@ with st.sidebar:
     elif presets.startswith("Already"):
         packet_size, mtu, header_size = 500, 1500, 20
 
-    play = st.button("Play animation", type="primary", width="stretch")
+    play = st.button("Play narration", type="primary", width="stretch")
     reset = st.button("Reset highlight", width="stretch")
+    st.caption("Use ▶ Send packets on the diagram to animate the forwarding path.")
 
 if "step" not in st.session_state:
     st.session_state.step = 0
@@ -158,6 +88,8 @@ if "playing" not in st.session_state:
     st.session_state.playing = False
 if "_advance" not in st.session_state:
     st.session_state._advance = False
+if "inspect" not in st.session_state:
+    st.session_state.inspect = 1
 
 try:
     result = fragment_ipv4(int(packet_size), int(mtu), int(header_size), int(identification))
@@ -176,6 +108,7 @@ elif reset:
     st.session_state.playing = False
     st.session_state.step = 0
     st.session_state._advance = False
+    st.session_state.inspect = 1
 elif st.session_state._advance:
     st.session_state._advance = False
     if st.session_state.step >= max_step:
@@ -194,9 +127,14 @@ if result.fragmented:
             highlight = frag.index
 
 st.plotly_chart(
-    packet_figure(result, highlight),
+    journey_figure(result, highlight),
     width="stretch",
-    key="packet_diagram",
+    key="journey_chart",
+)
+
+st.html(
+    '<div class="frag-hint">Hover a card to expand the byte-range and flag explanation.</div>'
+    + fragment_cards_html(result, highlight)
 )
 
 c1, c2, c3, c4 = st.columns(4)
@@ -205,10 +143,46 @@ c2.metric("Payload", f"{result.payload_size} B")
 c3.metric("Max fragment payload", f"{result.max_fragment_payload} B")
 c4.metric("Extra header overhead", f"{result.overhead_bytes} B")
 
+map_col, wire_col = st.columns((1.4, 1))
+with map_col:
+    map_event = st.plotly_chart(
+        payload_map_figure(result, highlight or st.session_state.inspect),
+        width="stretch",
+        key="payload_map",
+        on_select="rerun",
+        selection_mode="points",
+    )
+with wire_col:
+    st.plotly_chart(
+        on_wire_figure(result, highlight or st.session_state.inspect),
+        width="stretch",
+        key="on_wire_chart",
+    )
+
+inspect = highlight or int(st.session_state.inspect)
+try:  # clicking a payload slice pins that fragment in the header inspector
+    selection = map_event["selection"] if map_event is not None else None
+    points = (selection or {}).get("points") or []
+    if points:
+        custom = points[0].get("customdata")
+        if custom:
+            inspect = int(custom[0] if isinstance(custom, (list, tuple)) else custom)
+            st.session_state.inspect = inspect
+except (TypeError, KeyError, ValueError, IndexError):
+    pass
+inspect = max(1, min(inspect, result.fragment_count))
+pinned = next(f for f in result.fragments if f.index == inspect)
+
+st.plotly_chart(
+    header_inspector_figure(pinned),
+    width="stretch",
+    key="header_inspector",
+)
+
 left, right = st.columns((1.35, 1))
 with left:
     st.subheader("Fragment table")
-    st.dataframe(DataFrame(result.to_rows()), width="stretch", hide_index=True)
+    st.dataframe(DataFrame(result.to_rows()), width="stretch", hide_index=True, key="frag_table")
 with right:
     st.subheader("Why these numbers?")
     for note in result.notes:
@@ -225,15 +199,16 @@ with right:
 
 st.markdown(
     """
-**Field reminder (IPv4 header)**  
-- **Identification** — same on every fragment of this datagram.  
-- **Flags** — `0 DF MF`. This lab always uses DF=0 so fragmentation is allowed. MF=1 means more fragments follow.  
-- **Fragment Offset** — payload starting position ÷ 8.
+**How to read the animation**  
+1. The grey square is the original datagram leaving Host A.  
+2. The dashed orange slot is the **MTU** — nothing larger than that can be forwarded.  
+3. Colored squares are fragments; hover them for **which payload bytes**, **Offset ÷ 8**, and **MF**.  
+4. Hover the stacked payload bar to see how the original data is sliced. Click a slice to pin the header inspector.
 """
 )
 
 if st.session_state.playing:
-    st.caption(f"Playing step {st.session_state.step + 1} of {len(steps)}")
+    st.caption(f"Narration {st.session_state.step + 1} of {len(steps)}")
     time.sleep(1.15)
     st.session_state._advance = True
     st.rerun()

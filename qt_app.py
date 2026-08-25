@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PyQt6 desktop GUI: IP fragmentation lab with a simple animation."""
+"""PyQt6 desktop GUI: IP fragmentation lab with path animation and hover."""
 
 from __future__ import annotations
 
@@ -22,11 +22,12 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
 
-from ipfrag.diagram import color_for, explain_steps
+from ipfrag.diagram import color_for, explain_steps, hover_story_plain
 from ipfrag.engine import FragmentationError, FragmentationResult, fragment_ipv4
 
 
@@ -34,87 +35,167 @@ class PacketCanvas(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.result: FragmentationResult | None = None
-        self.visible_count = 0
-        self.setMinimumHeight(280)
-        self.setAutoFillBackground(True)
+        self.progress = 1.0
+        self.hover_index = 0
+        self.hit_rects: list[tuple[QRectF, int]] = []
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self.setMinimumHeight(360)
+        self.setMouseTracking(True)
         pal = self.palette()
         pal.setColor(self.backgroundRole(), QColor("#020617"))
         self.setPalette(pal)
+        self.setAutoFillBackground(True)
 
-    def set_result(self, result: FragmentationResult, visible_count: int | None = None) -> None:
+    def set_result(self, result: FragmentationResult, animate: bool = False) -> None:
         self.result = result
-        self.visible_count = result.fragment_count if visible_count is None else visible_count
+        self.hover_index = 0
+        if animate:
+            self.progress = 0.0
+            self._timer.start(32)
+        else:
+            self.progress = 1.0
+            self._timer.stop()
         self.update()
+
+    def _tick(self) -> None:
+        self.progress = min(1.0, self.progress + 0.01)
+        if self.progress >= 1.0:
+            self._timer.stop()
+        self.update()
+
+    def _layout(self) -> tuple[float, float, float]:
+        return 70.0, self.width() * 0.46, self.width() - 90.0
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        pos = event.position()
+        found = 0
+        for rect, index in self.hit_rects:
+            if rect.contains(pos):
+                found = index
+                break
+        if found != self.hover_index:
+            self.hover_index = found
+            self.update()
+        if found and self.result:
+            frag = self.result.fragments[found - 1]
+            QToolTip.showText(
+                event.globalPosition().toPoint(),
+                hover_story_plain(frag, self.result),
+                self,
+            )
+        else:
+            QToolTip.hideText()
+
+    def leaveEvent(self, event) -> None:  # noqa: N802
+        self.hover_index = 0
+        QToolTip.hideText()
+        self.update()
+        super().leaveEvent(event)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("#020617"))
+        self.hit_rects = []
         if self.result is None:
             painter.setPen(QColor("#94a3b8"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Enter values and click Fragment")
+            painter.drawText(
+                self.rect(),
+                Qt.AlignmentFlag.AlignCenter,
+                "Enter values and click Fragment or Animate send",
+            )
             return
 
         result = self.result
-        margin = 24
-        width = max(40, self.width() - 2 * margin)
-        scale = width / max(result.packet_size, 1)
+        src, gate, dst = self._layout()
+        mid_y = self.height() * 0.42
+        n = result.fragment_count
 
-        def draw_bar(y: int, x0: float, w: float, color: str, label: str, h: int = 36) -> None:
-            rect = QRectF(margin + x0, y, max(w, 2), h)
-            painter.setPen(QPen(QColor("#0f172a"), 1))
-            painter.setBrush(QColor(color))
+        def node(x: float, title: str) -> None:
+            box = QRectF(x - 52, 18, 104, 46)
+            painter.setPen(QPen(QColor("#38bdf8"), 1))
+            painter.setBrush(QColor("#1e3a5f"))
+            painter.drawRoundedRect(box, 8, 8)
+            painter.setPen(QColor("#e2e8f0"))
+            painter.setFont(QFont("Helvetica", 10, QFont.Weight.Bold))
+            painter.drawText(box, Qt.AlignmentFlag.AlignCenter, title)
+
+        node(src, "Host A\nsender")
+        node(gate, f"Router\nMTU {result.mtu} B")
+        node(dst, "Host B\nreassemble")
+
+        painter.setPen(QPen(QColor("#334155"), 4))
+        painter.drawLine(int(src + 52), int(mid_y), int(gate - 54), int(mid_y))
+        painter.drawLine(int(gate + 54), int(mid_y), int(dst - 54), int(mid_y))
+        painter.setPen(QPen(QColor("#f97316"), 2, Qt.PenStyle.DashLine))
+        painter.drawRect(QRectF(gate - 16, mid_y - 70, 32, 140))
+        painter.setPen(QColor("#fdba74"))
+        painter.setFont(QFont("Helvetica", 9))
+        painter.drawText(QRectF(gate - 70, mid_y + 78, 140, 20), Qt.AlignmentFlag.AlignCenter, "MTU gate")
+
+        p = self.progress
+        orig_visible = p < 0.36 or not result.fragmented
+        if orig_visible:
+            if p < 0.28:
+                ox = src + (gate - src) * (p / 0.28)
+            elif p < 0.36:
+                ox = gate
+            else:
+                ox = dst if not result.fragmented else gate
+            size = 50.0
+            rect = QRectF(ox - size / 2, mid_y - 16, size, 32)
+            painter.setBrush(QColor("#64748b"))
+            painter.setPen(QPen(QColor("#f8fafc"), 2))
             painter.drawRoundedRect(rect, 6, 6)
             painter.setPen(QColor("#f8fafc"))
-            painter.setFont(QFont("Menlo", 10))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "DATAGRAM")
 
-        painter.setPen(QColor("#e2e8f0"))
-        painter.setFont(QFont("Helvetica", 12, QFont.Weight.Bold))
-        painter.drawText(margin, 22, "Original datagram")
-
-        draw_bar(32, 0, result.header_size * scale, "#1e3a5f", f"H {result.header_size}")
-        draw_bar(
-            32,
-            result.header_size * scale,
-            result.payload_size * scale,
-            "#475569",
-            f"Payload {result.payload_size} B",
-        )
-
-        painter.drawText(margin, 92, "Fragments (each has its own header)")
-        y = 108
-        shown = min(self.visible_count, result.fragment_count)
-        for frag in result.fragments[:shown]:
-            draw_bar(y, 0, frag.header_size * scale, "#1e3a5f", f"H {frag.header_size}", 32)
-            draw_bar(
-                y,
-                frag.header_size * scale,
-                frag.payload_size * scale,
-                color_for(frag.index),
-                f"F{frag.index}  {frag.payload_size} B  off={frag.offset_units}  MF={frag.mf}",
-                32,
-            )
-            y += 42
+        span = 0.62 / max(n, 1)
+        for frag in result.fragments:
+            start = 0.36 + (frag.index - 1) * span * 0.35
+            if result.fragmented:
+                if p < start and p < 1.0:
+                    continue
+                local = 1.0 if p >= 1.0 else max(0.0, min(1.0, (p - start) / max(span * 0.9, 0.05)))
+                fx = gate + (dst - gate) * local
+            else:
+                fx = dst if p >= 0.36 else gate
+            fy = mid_y - 24 + (frag.index - (n + 1) / 2) * 36
+            w = 36 + 40 * (frag.total_size / max(result.mtu, 1))
+            rect = QRectF(fx - w / 2, fy - 14, w, 28)
+            accent = self.hover_index == frag.index
+            painter.setBrush(QColor(color_for(frag.index)))
+            painter.setPen(QPen(QColor("#facc15" if accent else "#0f172a"), 3 if accent else 1))
+            painter.drawRoundedRect(rect, 6, 6)
+            painter.setPen(QColor("#020617"))
+            painter.setFont(QFont("Helvetica", 9, QFont.Weight.Bold))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"F{frag.index}")
+            self.hit_rects.append((rect, frag.index))
 
         painter.setPen(QColor("#94a3b8"))
         painter.setFont(QFont("Helvetica", 10))
         painter.drawText(
-            margin,
-            self.height() - 12,
-            f"MTU {result.mtu} B   ID {result.identification}   "
-            f"{'fragmented' if result.fragmented else 'no fragmentation needed'}",
+            16,
+            self.height() - 14,
+            "Hover a fragment square for offset, MF, and payload byte range.",
         )
+        if self.hover_index and result:
+            frag = result.fragments[self.hover_index - 1]
+            painter.setPen(QColor("#e2e8f0"))
+            painter.drawText(
+                16,
+                self.height() - 32,
+                f"F{frag.index}: bytes {frag.offset_bytes}–{frag.payload_end - 1}  "
+                f"off={frag.offset_units}  {frag.flags_label}  {frag.total_size} B on wire",
+            )
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("IPv4 Fragmentation Lab")
-        self.resize(1100, 720)
-        self._timer = QTimer(self)
-        self._timer.timeout.connect(self._tick)
-        self._pending = 0
+        self.resize(1180, 760)
         self._result: FragmentationResult | None = None
 
         root = QWidget()
@@ -129,9 +210,9 @@ class MainWindow(QMainWindow):
         title.setStyleSheet("font-size: 18px; font-weight: 600;")
         form_wrap.addWidget(title)
         blurb = QLabel(
-            "This desktop lab shows how a router splits a datagram so each fragment "
-            "fits the next-hop MTU. Offsets are in units of 8 bytes; MF marks every "
-            "piece except the last."
+            "The datagram leaves Host A, hits the router’s MTU gate, then travels "
+            "as fragments to Host B. Hover a colored square or a table row for the "
+            "payload slice, offset (bytes ÷ 8), and MF flag."
         )
         blurb.setWordWrap(True)
         form_wrap.addWidget(blurb)
@@ -159,7 +240,7 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         self.go = QPushButton("Fragment")
         self.go.clicked.connect(self.run_now)
-        self.play = QPushButton("Animate")
+        self.play = QPushButton("Animate send")
         self.play.clicked.connect(self.run_animated)
         self.preset = QPushButton("Load 4000 / 1500 / 20")
         self.preset.clicked.connect(self.load_preset)
@@ -182,9 +263,12 @@ class MainWindow(QMainWindow):
             ["#", "ID", "Header", "Payload", "Total", "Offset B", "Offset ×8", "Flags DF/MF"]
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setMouseTracking(True)
+        self.table.viewport().setMouseTracking(True)
+        self.table.cellEntered.connect(self._table_hover)
         right_l.addWidget(self.table, 1)
         splitter.addWidget(right)
-        splitter.setSizes([320, 780])
+        splitter.setSizes([320, 860])
 
         self.setStyleSheet(
             """
@@ -196,6 +280,8 @@ class MainWindow(QMainWindow):
             QSpinBox, QTextEdit, QTableWidget { background: #020617; color: #e2e8f0;
                           border: 1px solid #1e293b; border-radius: 6px; }
             QHeaderView::section { background: #1e293b; color: #e2e8f0; padding: 4px; }
+            QToolTip { background: #0f172a; color: #e2e8f0; border: 1px solid #38bdf8;
+                       padding: 8px; }
             """
         )
 
@@ -233,23 +319,27 @@ class MainWindow(QMainWindow):
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setToolTip(hover_story_plain(frag, result))
                 self.table.setItem(row, col, item)
 
-    def _fill_notes(self, result: FragmentationResult, limit_steps: int | None = None) -> None:
+    def _table_hover(self, row: int, _col: int) -> None:
+        if self._result is None or row < 0 or row >= len(self._result.fragments):
+            return
+        self.canvas.hover_index = self._result.fragments[row].index
+        self.canvas.update()
+
+    def _fill_notes(self, result: FragmentationResult) -> None:
         steps = explain_steps(result)
-        if limit_steps is not None:
-            steps = steps[:limit_steps]
         body = "\n".join(f"• {n}" for n in result.notes)
         body += "\n\nWalk-through:\n" + "\n".join(f"{i+1}. {s}" for i, s in enumerate(steps))
         self.notes.setPlainText(body)
 
     def run_now(self) -> None:
-        self._timer.stop()
         result = self._compute()
         if result is None:
             return
         self._result = result
-        self.canvas.set_result(result)
+        self.canvas.set_result(result, animate=False)
         self._fill_table(result)
         self._fill_notes(result)
 
@@ -258,36 +348,9 @@ class MainWindow(QMainWindow):
         if result is None:
             return
         self._result = result
-        self._pending = 0
-        self.table.setRowCount(0)
-        self.canvas.set_result(result, visible_count=0)
-        self.notes.setPlainText("Animating fragment creation…")
-        self._timer.start(850)
-
-    def _tick(self) -> None:
-        if self._result is None:
-            self._timer.stop()
-            return
-        self._pending += 1
-        self.canvas.set_result(self._result, visible_count=self._pending)
-        shown = self._result.fragments[: self._pending]
-        tmp = FragmentationResult(
-            packet_size=self._result.packet_size,
-            mtu=self._result.mtu,
-            header_size=self._result.header_size,
-            payload_size=self._result.payload_size,
-            max_fragment_payload=self._result.max_fragment_payload,
-            identification=self._result.identification,
-            fragmented=self._result.fragmented,
-            fragments=list(shown),
-            notes=self._result.notes,
-        )
-        self._fill_table(tmp)
-        self._fill_notes(self._result, limit_steps=3 + self._pending)
-        if self._pending >= self._result.fragment_count:
-            self._timer.stop()
-            self._fill_table(self._result)
-            self._fill_notes(self._result)
+        self._fill_table(result)
+        self._fill_notes(result)
+        self.canvas.set_result(result, animate=True)
 
 
 def main() -> None:
