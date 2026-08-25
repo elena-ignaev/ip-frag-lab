@@ -70,6 +70,7 @@ def packet_figure(result, highlight: int) -> go.Figure:
                 base=0,
                 orientation="h",
                 marker=dict(color="#1e3a5f", line=line),
+                name=f"F{frag.index} header",
                 hovertemplate=f"F{frag.index} header: {frag.header_size} B<extra></extra>",
                 showlegend=False,
             )
@@ -153,6 +154,10 @@ with st.sidebar:
 
 if "step" not in st.session_state:
     st.session_state.step = 0
+if "playing" not in st.session_state:
+    st.session_state.playing = False
+if "_advance" not in st.session_state:
+    st.session_state._advance = False
 
 try:
     result = fragment_ipv4(int(packet_size), int(mtu), int(header_size), int(identification))
@@ -164,32 +169,35 @@ steps = explain_steps(result)
 max_step = len(steps) - 1
 
 if play:
+    st.session_state.playing = True
     st.session_state.step = 0
-    placeholder = st.empty()
-    status = st.empty()
+    st.session_state._advance = False
+elif reset:
+    st.session_state.playing = False
+    st.session_state.step = 0
+    st.session_state._advance = False
+elif st.session_state._advance:
+    st.session_state._advance = False
+    if st.session_state.step >= max_step:
+        st.session_state.playing = False
+    else:
+        st.session_state.step += 1
 
-    for i, text in enumerate(steps):
-        st.session_state.step = i
-        highlight = 0
-        if result.fragmented:
-            for frag in result.fragments:
-                token = f"Fragment {frag.index}:"
-                if token in text:
-                    highlight = frag.index
-        with placeholder.container():
-            st.plotly_chart(packet_figure(result, highlight), width="stretch")
-        status.info(f"Step {i + 1}/{len(steps)} — {text}")
-        time.sleep(1.15)
-else:
-    if reset:
-        st.session_state.step = 0
-    highlight = 0
-    current = steps[min(st.session_state.step, max_step)]
-    if result.fragmented:
-        for frag in result.fragments:
-            if f"Fragment {frag.index}:" in current:
-                highlight = frag.index
-    st.plotly_chart(packet_figure(result, highlight), width="stretch")
+if st.session_state.step > max_step:
+    st.session_state.step = max_step
+
+current = steps[st.session_state.step]
+highlight = 0
+if result.fragmented:
+    for frag in result.fragments:
+        if f"Fragment {frag.index}:" in current:
+            highlight = frag.index
+
+st.plotly_chart(
+    packet_figure(result, highlight),
+    width="stretch",
+    key="packet_diagram",
+)
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Fragments", result.fragment_count)
@@ -206,9 +214,14 @@ with right:
     for note in result.notes:
         st.write("• " + note)
     st.subheader("Walk-through")
-    step_idx = st.slider("Narration step", 0, max_step, st.session_state.step)
-    st.session_state.step = step_idx
-    st.info(steps[step_idx])
+    st.slider(
+        "Narration step",
+        min_value=0,
+        max_value=max_step,
+        key="step",
+        disabled=st.session_state.playing,
+    )
+    st.info(steps[st.session_state.step])
 
 st.markdown(
     """
@@ -218,3 +231,9 @@ st.markdown(
 - **Fragment Offset** — payload starting position ÷ 8.
 """
 )
+
+if st.session_state.playing:
+    st.caption(f"Playing step {st.session_state.step + 1} of {len(steps)}")
+    time.sleep(1.15)
+    st.session_state._advance = True
+    st.rerun()
