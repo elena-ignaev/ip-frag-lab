@@ -1,10 +1,23 @@
 # IPv4 Fragmentation Lab
 
-Teaching tool for the **network layer**: enter packet size, MTU, and IP header size, then see how an IPv4 datagram is fragmented (offsets, DF/MF flags) in two GUIs.
+Teaching tool for the **network layer**: enter packet size, MTU, and IP header size, then watch an IPv4 datagram hit the MTU limit and travel onward as fragments, with offsets and DF/MF flags explained on hover.
 
-- **Streamlit** — browser lab with a playable animation (`streamlit_app.py`)
-- **PyQt6** — desktop lab with a canvas animation (`qt_app.py`)
+- **Streamlit** — browser lab: animated forwarding path, hoverable packets, payload map, header inspector (`streamlit_app.py`)
+- **PyQt6** — desktop lab: animated canvas with hover tooltips (`qt_app.py`)
 - Shared engine: `ipfrag/engine.py` (RFC 791 rules, no packets are sent)
+- Shared figures: `ipfrag/figures.py`
+
+### What you can interact with
+
+| Interaction | What it teaches |
+| --- | --- |
+| **▶ Send packets** | Datagram reaches the router's MTU gate, then fragments cross the link one by one |
+| Hover a moving packet | On-wire size, the payload bytes it carries, `Offset ÷ 8`, Identification, why MF is 0 or 1 |
+| Hover a fragment card | Byte range and flag meaning, expanded in place |
+| Hover / click the payload map | Which original bytes became which fragment; clicking pins it in the header inspector |
+| Hover a header field | Meaning of Identification, Flags, Fragment Offset, Total Length for that fragment |
+| Scrub the path slider | Step through stages: leaving A → at MTU gate → Fn in flight |
+| **Play narration** | Walks the written explanation, highlighting the matching fragment |
 
 ## Setup
 

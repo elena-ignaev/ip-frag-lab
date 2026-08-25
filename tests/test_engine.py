@@ -16,7 +16,8 @@ def test_classic_4000_1500_20():
     assert c.payload_size == 1020 and c.offset_units == 370 and c.mf == 0
     assert all(f.identification == 777 for f in result.fragments)
     assert a.total_size == 1500
-    assert c.total_size == 1040
+    assert c.payload_end == 3980
+    assert a.payload_end == 1480
 
 
 def test_no_fragmentation_when_fits():

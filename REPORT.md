@@ -9,9 +9,10 @@ This program is a **network-layer teaching lab**. It does not transmit traffic. 
 | Layer | File | Role |
 | --- | --- | --- |
 | Engine | `ipfrag/engine.py` | Validates inputs; computes fragments |
-| Narration | `ipfrag/diagram.py` | Step text and fragment colours |
-| Web GUI | `streamlit_app.py` | Streamlit + Plotly animation |
-| Desktop GUI | `qt_app.py` | PyQt6 canvas, table, QTimer animation |
+| Narration | `ipfrag/diagram.py` | Step text, colours, hover explanations |
+| Figures | `ipfrag/figures.py` | Plotly path animation, payload map, header inspector |
+| Web GUI | `streamlit_app.py` | Streamlit page, hover cards, narration player |
+| Desktop GUI | `qt_app.py` | PyQt6 animated canvas with hover tooltips |
 | Tests | `tests/test_engine.py` | Checks the textbook 4000/1500/20 example |
 | Executable | PyInstaller on `qt_app.py` | Windowed desktop app |
 
@@ -38,9 +39,19 @@ Worked example used in tests and the demo video:
 
 ## 4. Graphical user interfaces
 
-**Streamlit.** Sidebar inputs, optional presets, a stacked-bar Plotly diagram (original datagram vs fragments), a table of fields, and **Play animation**, which walks the narration steps and highlights the fragment being explained.
+The goal of the visuals is to make fragmentation feel like an event on a link rather than a static table.
 
-**PyQt6.** Form on the left; custom-painted bars on the right; results table. **Fragment** shows the full result immediately. **Animate** uses `QTimer` to reveal fragments one by one.
+**Streamlit (web).**
+
+1. **Path animation** — the datagram leaves Host A, stops at the router's dashed **MTU gate**, and the fragments then cross to Host B one at a time. Driven by Plotly animation frames with **▶ Send packets**, **❚❚ Pause**, and a scrubber labelled by stage (“leaving A”, “at MTU gate”, “F2 in flight”).
+2. **Hover on any packet** — reports on-wire size, the header/payload split, which original payload bytes it carries, the Offset ÷ 8 arithmetic, Identification, and why MF is 0 or 1.
+3. **Fragment cards** — CSS hover expands each card to show the byte range and flag meaning.
+4. **Payload map** — the original payload as coloured slices, so students see the data being cut. Clicking a slice pins that fragment.
+5. **Header inspector** — the pinned fragment's IPv4 fields as hoverable boxes (Identification, Flags, Fragment Offset, Total Length), each with a teaching note.
+6. **On-wire size vs MTU** — bars against a dashed MTU ceiling, showing every fragment now fits.
+7. **Play narration** — steps the written walk-through and highlights the matching fragment everywhere.
+
+**PyQt6 (desktop).** The canvas draws Host A → router → Host B with the same story: a `QTimer` moves the datagram to the MTU gate, then releases fragments along the link. Hovering a fragment square shows a tooltip with the same offset/flag explanation and prints its byte range under the diagram; hovering a table row highlights the matching packet.
 
 ## 5. How to run and how to obtain an executable
 

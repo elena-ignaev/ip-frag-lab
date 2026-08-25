@@ -28,6 +28,11 @@ class Fragment:
         return self.offset_bytes // 8
 
     @property
+    def payload_end(self) -> int:
+        """First payload byte *not* carried by this fragment (exclusive)."""
+        return self.offset_bytes + self.payload_size
+
+    @property
     def total_size(self) -> int:
         return self.header_size + self.payload_size
 
