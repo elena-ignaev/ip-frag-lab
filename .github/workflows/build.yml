@@ -1,0 +1,101 @@
+name: Build executables
+
+# PyInstaller cannot cross-compile: it bundles the interpreter and native
+# libraries of the machine it runs on. Each target therefore needs its own
+# runner.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows x64
+            artifact: IPFragLab-windows-x64
+          # Last GitHub-hosted Intel macOS image; retires August 2027.
+          - os: macos-15-intel
+            label: macOS Intel
+            artifact: IPFragLab-macos-intel
+          - os: macos-latest
+            label: macOS Apple Silicon
+            artifact: IPFragLab-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest -q
+
+      # The committed spec carries datas=[('ipfrag', 'ipfrag')] as a Python
+      # tuple, which sidesteps the ':' vs ';' --add-data separator difference
+      # between POSIX and Windows.
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm IPFragLab.spec
+
+      # A build can succeed and still produce an app that dies instantly on a
+      # missing import, so launch it headless and require it to stay up.
+      - name: Smoke-test the app (macOS)
+        if: runner.os == 'macOS'
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ./dist/IPFragLab.app/Contents/MacOS/IPFragLab &
+          PID=$!
+          sleep 10
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "App still running after 10s"
+            kill "$PID"
+          else
+            echo "App exited early"
+            exit 1
+          fi
+
+      - name: Smoke-test the app (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $p = Start-Process -FilePath "dist\IPFragLab\IPFragLab.exe" -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) {
+            Write-Host "App exited early with code $($p.ExitCode)"
+            exit 1
+          }
+          Write-Host "App still running after 10s"
+          Stop-Process -Id $p.Id -Force
+
+      # upload-artifact does not preserve the executable bit or symlinks, which
+      # would break the .app bundle on download. Zip it first with ditto.
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: ditto -c -k --keepParent "dist/IPFragLab.app" "${{ matrix.artifact }}.zip"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist\IPFragLab\*" -DestinationPath "${{ matrix.artifact }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+          if-no-files-found: error
